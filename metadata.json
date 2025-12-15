@@ -1,0 +1,5 @@
+{
+  "name": "FlowLog",
+  "description": "A behavior-oriented time tracking app designed to visualize reality. Log what you just did to create a gapless timeline of your day.",
+  "requestFramePermissions": []
+}
