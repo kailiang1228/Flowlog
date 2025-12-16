@@ -22,13 +22,32 @@ const App: React.FC = () => {
   
   const [currentStartTime, setCurrentStartTime] = useState<number>(() => {
     const saved = localStorage.getItem('flowlog_startTime');
-    if (saved) return parseInt(saved, 10);
-    
+    const now = Date.now();
+    let startTime: number;
+    if (saved) {
+      startTime = parseInt(saved, 10);
+      // 若超過 24 小時或異常，重設為今天 00:00
+      if (isNaN(startTime) || startTime > now || now - startTime > 24 * 60 * 60 * 1000) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        return today.getTime();
+      }
+      return startTime;
+    }
     // Default to Midnight (00:00) of today if new
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     return today.getTime();
   });
+  // 每次 App 載入時檢查 currentStartTime 是否異常，若超過 24 小時自動重設
+  useEffect(() => {
+    const now = Date.now();
+    if (currentStartTime > now || now - currentStartTime > 24 * 60 * 60 * 1000) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      setCurrentStartTime(today.getTime());
+    }
+  }, []);
 
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem('flowlog_theme');
@@ -104,6 +123,27 @@ const App: React.FC = () => {
         if (Array.isArray(parsed)) {
           if(window.confirm(`Found ${parsed.length} entries. Overwrite current data?`)) {
             setEntries(parsed);
+            // 決定新的 currentStartTime
+            let newStart = undefined;
+            if (parsed.length > 0) {
+              // 找到最大 endTime
+              const lastEnd = Math.max(...parsed.map(e => e.endTime));
+              const now = Date.now();
+              if (lastEnd > now || now - lastEnd > 24 * 60 * 60 * 1000) {
+                // 超過 24 小時或異常，設為今天 00:00
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                newStart = today.getTime();
+              } else {
+                newStart = lastEnd;
+              }
+            } else {
+              // 沒有 log，設為今天 00:00
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              newStart = today.getTime();
+            }
+            setCurrentStartTime(newStart);
             alert('Import successful!');
           }
         } else {

@@ -18,6 +18,8 @@ const StatsView: React.FC<StatsViewProps> = ({ entries, categories }) => {
     d.setHours(0,0,0,0);
     return d;
   });
+  // 新增分類篩選器
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
 
   // 切換日期
   const handlePrev = () => {
@@ -38,7 +40,7 @@ const StatsView: React.FC<StatsViewProps> = ({ entries, categories }) => {
     setCurrentDate(d);
   }, [range]);
 
-  // Filter entries based on range & currentDate
+  // Filter entries based on range & currentDate & category
   const filteredEntries = useMemo(() => {
     let start: Date, end: Date;
     if (range === 'today') {
@@ -46,21 +48,23 @@ const StatsView: React.FC<StatsViewProps> = ({ entries, categories }) => {
       end = new Date(currentDate);
       end.setHours(23,59,59,999);
     } else if (range === 'week') {
-      // 以 currentDate 所在週的週一~週日
       const day = currentDate.getDay();
       start = addDays(currentDate, -((day + 6) % 7));
       start.setHours(0,0,0,0);
       end = addDays(start, 6);
       end.setHours(23,59,59,999);
     } else {
-      // 以 currentDate 所在月的 1 號~月底
       const year = currentDate.getFullYear();
       const month = currentDate.getMonth();
       start = new Date(year, month, 1, 0, 0, 0, 0);
       end = new Date(year, month + 1, 0, 23, 59, 59, 999);
     }
-    return entries.filter((e) => isWithinInterval(new Date(e.startTime), { start, end }));
-  }, [entries, range, currentDate]);
+    return entries.filter((e) => {
+      const inRange = isWithinInterval(new Date(e.startTime), { start, end });
+      const inCategory = categoryFilter === 'all' ? true : e.categoryId === categoryFilter;
+      return inRange && inCategory;
+    });
+  }, [entries, range, currentDate, categoryFilter]);
 
   // Data for Pie Chart
   const pieData = useMemo(() => {
@@ -85,19 +89,18 @@ const StatsView: React.FC<StatsViewProps> = ({ entries, categories }) => {
     return data;
   }, [filteredEntries, categories]);
 
-  // Data for Trend Chart (Week/Month)
+  // Data for Trend Chart (Week/Month) - 依分類篩選
   const trendData = useMemo(() => {
     if (range === 'today') return [];
 
     if (range === 'week') {
-      // 以 currentDate 所在週的週一~週日
       const day = currentDate.getDay();
       const monday = addDays(currentDate, -((day + 6) % 7));
       const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
       return days.map(dayObj => {
         const dayStart = dayObj.getTime();
         const dayEnd = dayStart + 86400000;
-        const totalMilliseconds = entries.reduce((acc, e) => {
+        const totalMilliseconds = filteredEntries.reduce((acc, e) => {
           if (e.startTime >= dayStart && e.startTime < dayEnd) {
             return acc + (e.endTime - e.startTime);
           }
@@ -105,7 +108,7 @@ const StatsView: React.FC<StatsViewProps> = ({ entries, categories }) => {
         }, 0);
         const hours = totalMilliseconds / (1000 * 60 * 60);
         return {
-          date: format(dayObj, 'EEE'), // Mon, Tue, ...
+          date: format(dayObj, 'EEE'),
           fullDate: format(dayObj, 'yyyy/MM/dd'),
           hours: parseFloat(hours.toFixed(1)),
         };
@@ -120,7 +123,7 @@ const StatsView: React.FC<StatsViewProps> = ({ entries, categories }) => {
     return days.map(dayObj => {
       const dayStart = dayObj.getTime();
       const dayEnd = dayStart + 86400000;
-      const totalMilliseconds = entries.reduce((acc, e) => {
+      const totalMilliseconds = filteredEntries.reduce((acc, e) => {
         if (e.startTime >= dayStart && e.startTime < dayEnd) {
           return acc + (e.endTime - e.startTime);
         }
@@ -128,12 +131,12 @@ const StatsView: React.FC<StatsViewProps> = ({ entries, categories }) => {
       }, 0);
       const hours = totalMilliseconds / (1000 * 60 * 60);
       return {
-        date: format(dayObj, 'd'), // 1, 2, ...
+        date: format(dayObj, 'd'),
         fullDate: format(dayObj, 'yyyy/MM/dd'),
         hours: parseFloat(hours.toFixed(1)),
       };
     });
-  }, [entries, range, currentDate]);
+  }, [filteredEntries, range, currentDate]);
 
   const totalDuration = pieData.reduce((acc, curr) => acc + curr.value, 0);
 
@@ -170,9 +173,9 @@ const StatsView: React.FC<StatsViewProps> = ({ entries, categories }) => {
     <div className="flex flex-col h-full bg-gray-50 dark:bg-slate-900 p-4 overflow-y-auto pb-24">
       <h2 className="text-2xl font-bold mb-4 dark:text-white shrink-0">Insights</h2>
 
-      {/* Range Switcher + 日期切換 */}
-      <div className="flex items-center mb-4 gap-2 shrink-0">
-        <div className="flex bg-gray-200 dark:bg-slate-800 rounded-lg p-1">
+      {/* Range Switcher */}
+      <div className="flex mb-2 shrink-0">
+        <div className="flex bg-gray-200 dark:bg-slate-800 rounded-lg p-1 w-full">
           {(['today', 'week', 'month'] as TimeRange[]).map((r) => (
             <button
               key={r}
@@ -187,24 +190,37 @@ const StatsView: React.FC<StatsViewProps> = ({ entries, categories }) => {
             </button>
           ))}
         </div>
-        <div className="flex items-center ml-auto gap-1">
+      </div>
+      {/* 日期切換與分類篩選器，手機自動換行 */}
+      {/* 日期切換與分類篩選同一行，左右分開 */}
+      <div className="mb-4 w-full flex flex-row items-center gap-2">
+        <div className="flex items-center">
           <button onClick={handlePrev} className="px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-slate-700 text-lg" title="前一日/週/月">&#8592;</button>
           <span className="font-mono text-sm px-2 select-none">
             {range === 'today' && format(currentDate, 'yyyy-MM-dd')}
             {range === 'week' && (() => {
-              // 找到該週的週一與週日
               const day = currentDate.getDay();
               const monday = addDays(currentDate, -((day + 6) % 7));
               const sunday = addDays(monday, 6);
               return `${format(monday, 'MM/dd')} ~ ${format(sunday, 'MM/dd')}`;
             })()}
             {range === 'month' && (() => {
-              // 只顯示年月
               return format(currentDate, 'yyyy/MM');
             })()}
           </span>
           <button onClick={handleNext} className="px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-slate-700 text-lg" title="後一日/週/月">&#8594;</button>
         </div>
+        <div className="flex-1"></div>
+        <select
+          className="px-2 py-1 rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-gray-700 dark:text-gray-200 max-w-xs ml-auto"
+          value={categoryFilter}
+          onChange={e => setCategoryFilter(e.target.value)}
+        >
+          <option value="all">全部分類</option>
+          {categories.map(cat => (
+            <option key={cat.id} value={cat.id}>{cat.name}</option>
+          ))}
+        </select>
       </div>
 
       {/* Summary Cards */}
