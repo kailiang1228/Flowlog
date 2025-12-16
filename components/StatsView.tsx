@@ -13,24 +13,54 @@ type TimeRange = 'today' | 'week' | 'month';
 
 const StatsView: React.FC<StatsViewProps> = ({ entries, categories }) => {
   const [range, setRange] = useState<TimeRange>('today');
+  const [currentDate, setCurrentDate] = useState(() => {
+    const d = new Date();
+    d.setHours(0,0,0,0);
+    return d;
+  });
 
-  // Filter entries based on range
+  // 切換日期
+  const handlePrev = () => {
+    if (range === 'today') setCurrentDate(prev => addDays(prev, -1));
+    else if (range === 'week') setCurrentDate(prev => addDays(prev, -7));
+    else setCurrentDate(prev => addDays(prev, -30));
+  };
+  const handleNext = () => {
+    if (range === 'today') setCurrentDate(prev => addDays(prev, 1));
+    else if (range === 'week') setCurrentDate(prev => addDays(prev, 7));
+    else setCurrentDate(prev => addDays(prev, 30));
+  };
+
+  // 切換 range 時自動回到今天
+  React.useEffect(() => {
+    const d = new Date();
+    d.setHours(0,0,0,0);
+    setCurrentDate(d);
+  }, [range]);
+
+  // Filter entries based on range & currentDate
   const filteredEntries = useMemo(() => {
-    const now = new Date();
+    let start: Date, end: Date;
     if (range === 'today') {
-      return entries.filter((e) => isSameDay(new Date(e.startTime), now));
+      start = new Date(currentDate);
+      end = new Date(currentDate);
+      end.setHours(23,59,59,999);
     } else if (range === 'week') {
-      const end = now;
-      const start = addDays(now, -6); // Last 7 days including today
+      // 以 currentDate 所在週的週一~週日
+      const day = currentDate.getDay();
+      start = addDays(currentDate, -((day + 6) % 7));
       start.setHours(0,0,0,0);
-      return entries.filter((e) => isWithinInterval(new Date(e.startTime), { start, end }));
+      end = addDays(start, 6);
+      end.setHours(23,59,59,999);
     } else {
-      const end = now;
-      const start = addDays(now, -29); // Last 30 days
-      start.setHours(0,0,0,0);
-      return entries.filter((e) => isWithinInterval(new Date(e.startTime), { start, end }));
+      // 以 currentDate 所在月的 1 號~月底
+      const year = currentDate.getFullYear();
+      const month = currentDate.getMonth();
+      start = new Date(year, month, 1, 0, 0, 0, 0);
+      end = new Date(year, month + 1, 0, 23, 59, 59, 999);
     }
-  }, [entries, range]);
+    return entries.filter((e) => isWithinInterval(new Date(e.startTime), { start, end }));
+  }, [entries, range, currentDate]);
 
   // Data for Pie Chart
   const pieData = useMemo(() => {
@@ -59,34 +89,51 @@ const StatsView: React.FC<StatsViewProps> = ({ entries, categories }) => {
   const trendData = useMemo(() => {
     if (range === 'today') return [];
 
-    const end = new Date();
-    const start = addDays(end, range === 'week' ? -6 : -29);
-    start.setHours(0,0,0,0);
-    
-    const days = eachDayOfInterval({ start, end });
-
-    return days.map(day => {
-       const dayStart = day.getTime();
-       const dayEnd = dayStart + 86400000;
-       
-       const totalMilliseconds = entries.reduce((acc, e) => {
-         // Check overlap (simplified: based on start time falling in the day)
-         if (e.startTime >= dayStart && e.startTime < dayEnd) {
-           return acc + (e.endTime - e.startTime);
-         }
-         return acc;
-       }, 0);
-
-       // Convert milliseconds to hours (ms / 1000 / 60 / 60)
-       const hours = totalMilliseconds / (1000 * 60 * 60);
-
-       return {
-         date: format(day, range === 'week' ? 'EEE' : 'd'), // Mon or 23
-         fullDate: format(day, 'MMM d'),
-         hours: parseFloat(hours.toFixed(1)),
-       };
+    if (range === 'week') {
+      // 以 currentDate 所在週的週一~週日
+      const day = currentDate.getDay();
+      const monday = addDays(currentDate, -((day + 6) % 7));
+      const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+      return days.map(dayObj => {
+        const dayStart = dayObj.getTime();
+        const dayEnd = dayStart + 86400000;
+        const totalMilliseconds = entries.reduce((acc, e) => {
+          if (e.startTime >= dayStart && e.startTime < dayEnd) {
+            return acc + (e.endTime - e.startTime);
+          }
+          return acc;
+        }, 0);
+        const hours = totalMilliseconds / (1000 * 60 * 60);
+        return {
+          date: format(dayObj, 'EEE'), // Mon, Tue, ...
+          fullDate: format(dayObj, 'yyyy/MM/dd'),
+          hours: parseFloat(hours.toFixed(1)),
+        };
+      });
+    }
+    // month: 以 currentDate 所在月的 1 號~月底
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    const first = new Date(year, month, 1, 0, 0, 0, 0);
+    const last = new Date(year, month + 1, 0, 23, 59, 59, 999);
+    const days = eachDayOfInterval({ start: first, end: last });
+    return days.map(dayObj => {
+      const dayStart = dayObj.getTime();
+      const dayEnd = dayStart + 86400000;
+      const totalMilliseconds = entries.reduce((acc, e) => {
+        if (e.startTime >= dayStart && e.startTime < dayEnd) {
+          return acc + (e.endTime - e.startTime);
+        }
+        return acc;
+      }, 0);
+      const hours = totalMilliseconds / (1000 * 60 * 60);
+      return {
+        date: format(dayObj, 'd'), // 1, 2, ...
+        fullDate: format(dayObj, 'yyyy/MM/dd'),
+        hours: parseFloat(hours.toFixed(1)),
+      };
     });
-  }, [entries, range]);
+  }, [entries, range, currentDate]);
 
   const totalDuration = pieData.reduce((acc, curr) => acc + curr.value, 0);
 
@@ -122,22 +169,42 @@ const StatsView: React.FC<StatsViewProps> = ({ entries, categories }) => {
   return (
     <div className="flex flex-col h-full bg-gray-50 dark:bg-slate-900 p-4 overflow-y-auto pb-24">
       <h2 className="text-2xl font-bold mb-4 dark:text-white shrink-0">Insights</h2>
-      
-      {/* Range Switcher */}
-      <div className="flex bg-gray-200 dark:bg-slate-800 rounded-lg p-1 mb-6 shrink-0">
-        {(['today', 'week', 'month'] as TimeRange[]).map((r) => (
-          <button
-            key={r}
-            onClick={() => setRange(r)}
-            className={`flex-1 py-1.5 text-sm font-medium rounded-md capitalize transition ${
-              range === r
-                ? 'bg-white dark:bg-slate-600 text-gray-900 dark:text-white shadow-sm'
-                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700'
-            }`}
-          >
-            {r}
-          </button>
-        ))}
+
+      {/* Range Switcher + 日期切換 */}
+      <div className="flex items-center mb-4 gap-2 shrink-0">
+        <div className="flex bg-gray-200 dark:bg-slate-800 rounded-lg p-1">
+          {(['today', 'week', 'month'] as TimeRange[]).map((r) => (
+            <button
+              key={r}
+              onClick={() => setRange(r)}
+              className={`flex-1 py-1.5 px-3 text-sm font-medium rounded-md capitalize transition ${
+                range === r
+                  ? 'bg-white dark:bg-slate-600 text-gray-900 dark:text-white shadow-sm'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700'
+              }`}
+            >
+              {r}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center ml-auto gap-1">
+          <button onClick={handlePrev} className="px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-slate-700 text-lg" title="前一日/週/月">&#8592;</button>
+          <span className="font-mono text-sm px-2 select-none">
+            {range === 'today' && format(currentDate, 'yyyy-MM-dd')}
+            {range === 'week' && (() => {
+              // 找到該週的週一與週日
+              const day = currentDate.getDay();
+              const monday = addDays(currentDate, -((day + 6) % 7));
+              const sunday = addDays(monday, 6);
+              return `${format(monday, 'MM/dd')} ~ ${format(sunday, 'MM/dd')}`;
+            })()}
+            {range === 'month' && (() => {
+              // 只顯示年月
+              return format(currentDate, 'yyyy/MM');
+            })()}
+          </span>
+          <button onClick={handleNext} className="px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-slate-700 text-lg" title="後一日/週/月">&#8594;</button>
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -162,7 +229,7 @@ const StatsView: React.FC<StatsViewProps> = ({ entries, categories }) => {
           <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-4">Activity Trend</h3>
           <div className="h-48 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={trendData}>
+              <AreaChart data={trendData} margin={{ left: 0, right: 0 }}>
                 <defs>
                   <linearGradient id="colorHours" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
@@ -174,8 +241,28 @@ const StatsView: React.FC<StatsViewProps> = ({ entries, categories }) => {
                   dataKey="date" 
                   axisLine={false} 
                   tickLine={false} 
-                  tick={{fontSize: 10, fill: '#9ca3af'}} 
                   dy={10}
+                  interval={0}
+                  minTickGap={0}
+                  padding={{ left: 16, right: 16 }}
+                  tick={
+                    range === 'week'
+                      ? (props) => {
+                          // 強制顯示 Mon~Sun，左右多留空間
+                          const { payload, x, y } = props;
+                          return <text x={x} y={y+10} textAnchor="middle" fontSize={12} fill="#9ca3af">{payload.value}</text>;
+                        }
+                      : (props) => {
+                          // 月：只顯示奇數日
+                          const { payload, x, y } = props;
+                          const day = parseInt(payload.value, 10);
+                          if (day % 2 === 1) {
+                            return <text x={x} y={y+10} textAnchor="middle" fontSize={10} fill="#9ca3af">{payload.value}</text>;
+                          }
+                          return null;
+                        }
+                  }
+                  tickFormatter={undefined}
                 />
                 <YAxis 
                    hide 
